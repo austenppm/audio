@@ -4,6 +4,11 @@ import matplotlib.pyplot as plt
 import tkinter
 from tkinter import filedialog
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import pickle
+
+# Load the model
+with open('aiueo_model.pkl', 'rb') as file:
+    model = pickle.load(file)
 
 # Constants
 size_frame = 4096
@@ -31,13 +36,14 @@ def find_fundamental_frequency(autocorr, sr):
     return frequency
 
 def process_audio_file(filename):
-    global x, duration, spectrogram, volume, fundamental_frequencies, overall_fundamental_freq
+    global x, duration, spectrogram, volume, fundamental_frequencies, overall_fundamental_freq, vowel_predictions
     
     x, _ = librosa.load(filename, sr=SR)
     duration = len(x) / SR
     spectrogram = []
     volume = []
     fundamental_frequencies = []
+    vowel_predictions = []
 
     # Compute spectrogram and volume
     hamming_window = np.hamming(size_frame)
@@ -53,6 +59,14 @@ def process_audio_file(filename):
     autocorr = np.correlate(x, x, 'full')
     autocorr = autocorr[len(autocorr)//2:]
     overall_fundamental_freq = find_fundamental_frequency(autocorr, SR)
+    
+    for i in range(0, len(x) - FRAME_SIZE, HOP_SIZE):
+        frame = x[i:i + FRAME_SIZE]
+        mfcc = librosa.feature.mfcc(y=frame, sr=SR, n_mfcc=20, n_fft=1024)  # Reduce n_fft to match frame size
+        mfcc_mean = np.mean(mfcc, axis=1).reshape(1, -1)  # Reshape for single sample prediction
+        prediction = model.predict(mfcc_mean)[0]
+        vowel_predictions.append(prediction * 1500)  # Multiply by 1500 for graphing
+
 
     for i in range(0, len(x) - FRAME_SIZE, HOP_SIZE):
         frame = x[i:i + FRAME_SIZE]
@@ -70,7 +84,8 @@ def update_plots():
     ax3.clear()
     ax1.imshow(np.flipud(np.array(spectrogram).T), extent=[0, duration, 0, 8000], aspect='auto', interpolation='nearest')
     ax1.plot(np.arange(0, duration, duration/len(fundamental_frequencies)), fundamental_frequencies, color='r', linestyle='-', label=f'Overall Fundamental Freq: {overall_fundamental_freq:.2f} Hz')
-    ax1.legend(loc='upper right')
+    ax1.plot(np.arange(0, duration, duration/len(vowel_predictions)), vowel_predictions, color='b', linestyle='-', label='Vowel Predictions')
+    ax1.legend(loc=(0.5, 1))  # Adjust the numbers as needed
     ax1.set_xlabel('sec')
     ax1.set_ylabel('frequency [Hz]')
 
@@ -121,7 +136,7 @@ frame_left_top.pack(side="top", fill='both', expand=True)
 frame_left_bottom = tkinter.Frame(frame_left)
 frame_left_bottom.pack(side="bottom", fill='x')
 
-# Spectrogram plot setup
+# Spectrogram plot setup 
 fig, ax1 = plt.subplots()
 canvas = FigureCanvasTkAgg(fig, master=frame_left_top)
 canvas.get_tk_widget().pack(side="top", fill='both', expand=True)

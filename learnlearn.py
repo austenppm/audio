@@ -1,6 +1,7 @@
 import numpy as np
 import librosa
 import matplotlib.pyplot as plt
+import pickle
 
 
 def get_spec(x_frame):
@@ -155,6 +156,12 @@ x_implement = x_short
 
 spec = spectrogram(x_implement, SIZE_FRAME, SHIFT_SIZE)
 rec = recognize(x_implement, avgs, vars, SIZE_FRAME)
+
+# Save the model
+model = {'avgs': avgs, 'vars': vars}
+with open('aiueo_model.pkl', 'wb') as file:
+    pickle.dump(model, file)
+
 
 fig = plt.figure()
 
