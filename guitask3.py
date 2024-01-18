@@ -146,7 +146,7 @@ ani = animation.FuncAnimation(
 	fig,
 	animate,		# 再描画のために呼び出される関数
 	interval=100,	# 100ミリ秒間隔で再描画を行う（PC環境によって処理が追いつかない場合はこの値を大きくするとよい）
-	blit=True		# blitting処理を行うため描画処理が速くなる
+	blit=True		# blitting処理を行うため描画処理が速くなる（環境によってうまく動作しない場合はこれをFalseにしてみること）
 )
 
 # matplotlib を GUI(Tkinter) に追加する
@@ -233,7 +233,7 @@ stream = p.open(
 
 # mp3ファイル名
 # ここは各自の音源ファイルに合わせて変更すること
-filename = './mp3/hotaru_no_hikari.mp3'
+filename = 'aiueo.wav'
 
 #
 # 【注意】なるべく1チャネルの音声を利用すること

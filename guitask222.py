@@ -5,9 +5,10 @@ import tkinter
 from tkinter import filedialog
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import pickle
-import pygame
 import time
 import threading
+import vlc  # Import VLC module
+from pydub import AudioSegment
 
 # Load the model
 with open('aiueo_model.pkl', 'rb') as file:
@@ -21,11 +22,10 @@ FRAME_SIZE = 1024
 HOP_SIZE = SR // 100
 
 # Initialize variables
-duration = 0  # Default value for duration
-x = np.array([])  # Empty array for audio data
-volume = np.array([])  # Empty array for volume
+duration, x, volume = 0, np.array([]), np.array([])
+vlc_instance, vlc_player = vlc.Instance(), vlc.Instance().media_player_new()
 
-is_paused = False
+# Drawing
 
 def is_peak(a, index):
     if index == 0 or index == len(a) - 1:
@@ -103,15 +103,6 @@ def update_plots():
 
     scale.config(from_=0, to=duration)
     
-def load_audio_file():
-    filename = filedialog.askopenfilename(title="Select Audio File", filetypes=[("WAV Files", "*.wav")])
-    if filename:
-        process_audio_file(filename)
-        load_audio(filename)
-		# Update slider range based on audio length
-        audio_length = pygame.mixer.Sound(filename).get_length()
-        audio_seek_slider.config(to=audio_length)
-        
 # Callback function for slider
 def _draw_spectrum(v):
     # ax3 = ax1.twinx()
@@ -130,43 +121,93 @@ def _draw_spectrum(v):
     ax3.set_xlim(0, SR/2)
     ax3.set_ylabel('amplitude')
     ax3.set_xlabel('frequency [Hz]')
-    canvas2.draw()
-        
-def load_audio(filename):
-    pygame.mixer.init()    
-    pygame.mixer.music.load(filename)
-    
+    canvas2.draw()    
+
+def load_audio_file():
+    global duration, x, spectrogram, volume, fundamental_frequencies, overall_fundamental_freq, vowel_predictions
+    filename = filedialog.askopenfilename(title="Select Audio File", filetypes=[("Audio Files", "*.wav *.mp3")])
+    if filename:
+        process_audio_file(filename)
+        audio_segment = AudioSegment.from_file(filename)
+        duration = len(audio_segment) / 1000  # Duration in seconds
+
+        # Load audio into VLC player
+        media = vlc_instance.media_new(filename)
+        vlc_player.set_media(media)
+
+        # Attach event to VLC player for position change
+        event_manager = vlc_player.event_manager()
+        event_manager.event_attach(vlc.EventType.MediaPlayerPositionChanged, on_position_changed)
+
+        # Update duration in slider
+        update_audio_duration(duration)
+
+
 def play_audio():
-	pygame.mixer.music.play()
- 
+    if vlc_player.get_media():
+        vlc_player.play()
+        # Update the slider in a background thread
+        threading.Thread(target=update_slider, args=(duration,)).start()
+
+def update_slider(audio_length):
+    while vlc_player.is_playing():
+        time.sleep(0.01)  # Reduce the delay to improve responsiveness
+        current_position = vlc_player.get_time() / 1000.0  # Convert to seconds
+        if current_position >= audio_length:
+            audio_seek_slider.set(audio_length)
+            break
+        else:
+            audio_seek_slider.set(current_position)  # Update the audio seek slider with the current position
+
 def stop_audio():
-	pygame.mixer.music.stop()
- 
+    vlc_player.stop()
+    audio_seek_slider.set(0)
+
 def pause_audio():
-	pygame.mixer.music.pause()
- 
+    vlc_player.pause()
+
 def unpause_audio():
-	pygame.mixer.music.unpause()
- 
+    vlc_player.play()
+
 def seek_audio(position):
-	pygame.mixer.music.play(0, position)
+    if vlc_player.get_media():
+        vlc_player.set_time(int(position * 1000))  # VLC uses milliseconds
 
-def toggle_pause():
-    global is_paused
-    if is_paused:
-        pygame.mixer.music.unpause()
-    else:
-        pygame.mixer.music.pause()
-    is_paused = not is_paused
+def update_slider(audio_length):
+    while vlc_player.is_playing():
+        time.sleep(0.1)
+        current_position = vlc_player.get_time() / 1000.0  # Convert to seconds
+        if current_position >= audio_length:
+            audio_seek_slider.set(audio_length)
+            break
+        else:
+            audio_seek_slider.set(current_position)
 
-# Function to update playback based on slider
+def update_audio_duration(new_duration):
+    scale.config(to=new_duration)
+    audio_seek_slider.config(to=new_duration)
+
 def on_slider_change(val):
     seek_audio(float(val))
-    
- # Function to update playback speed
-def set_playback_speed(speed):
-    pygame.mixer.music.set_pos(speed)
-               
+
+def start_slider_thread():
+    slider_thread = threading.Thread(target=update_slider)
+    slider_thread.start()
+
+def set_playback_speed(val):
+    speed = float(val)
+    vlc_player.set_rate(speed)
+
+def seek_forward():
+    # Seek forward by a fixed amount, e.g., 5 seconds
+    current_time = vlc_player.get_time()
+    vlc_player.set_time(current_time + 5000)
+
+def seek_backward():
+    # Seek backward by a fixed amount, e.g., 5 seconds
+    current_time = vlc_player.get_time()
+    vlc_player.set_time(max(current_time - 5000, 0))
+        
 # Initialize Tkinter
 root = tkinter.Tk()
 root.wm_title("Audio Signal Analysis")
@@ -218,7 +259,7 @@ canvas2.get_tk_widget().pack(side="top", fill='both', expand=True)
 # Slider for time selection
 scale = tkinter.Scale(frame_right_bottom, command=_draw_spectrum, from_=0, to=duration, resolution=size_shift/SR, label='Select Time (sec)', orient=tkinter.HORIZONTAL)
 scale.pack(fill='x')
-
+ 
 # Media Player Controls in Bottom Frame
 load_button = tkinter.Button(bottom_frame_top, text="Load Audio File", command=load_audio_file)
 load_button.pack(side="left", fill='x')
@@ -227,7 +268,7 @@ play_button = tkinter.Button(bottom_frame_top, text="Play", command=play_audio)
 play_button.pack(side="left", fill='x')
 
 # Update pause_button to use toggle_pause
-pause_button = tkinter.Button(bottom_frame_top, text="Pause/Unpause", command=toggle_pause)
+pause_button = tkinter.Button(bottom_frame_top, text="Pause/Unpause", command=pause_audio)
 pause_button.pack(side="left", fill='x')
 
 stop_button = tkinter.Button(bottom_frame_top, text="Stop", command=stop_audio)
@@ -235,11 +276,26 @@ stop_button.pack(side="left", fill='x')
 
 # Speed Adjustment
 speed_scale = tkinter.Scale(bottom_frame_top, from_=0.5, to=2.0, resolution=0.1, orient=tkinter.HORIZONTAL, label='Speed', command=set_playback_speed)
+speed_scale.set(1.0)  # Default speed
 speed_scale.pack(side='right')
+
+seek_backward_button = tkinter.Button(bottom_frame_top, text="<<", command=seek_backward)
+seek_backward_button.pack(side="left", fill='x')
+
+# Add buttons to the GUI for seeking
+seek_forward_button = tkinter.Button(bottom_frame_top, text=">>", command=seek_forward)
+seek_forward_button.pack(side="left", fill='x')
 
 # Seekbar for Audio
 audio_seek_slider = tkinter.Scale(bottom_frame, from_=0, to=duration, resolution=size_shift/SR, orient=tkinter.HORIZONTAL, command=on_slider_change)
 audio_seek_slider.pack(side='bottom', fill='x', expand=True)
 
-# Start the GUI
-root.mainloop()
+# Update function calls
+load_button.config(command=load_audio_file)
+play_button.config(command=play_audio)
+pause_button.config(command=pause_audio)
+stop_button.config(command=stop_audio)
+audio_seek_slider.config(command=on_slider_change)
+
+root.mainloop()  # Start the Tkinter GUI in the main thread
+        
